@@ -7,10 +7,12 @@ import {
   Crown,
   User,
   Hash,
+  LogOut,
+  WifiOff,
 } from "lucide-react";
 
 // --- CONFIGURATION ---
-// Handle environment variables safely for the preview environment
+// Folosim direct URL-ul local pentru a evita erorile de 'import.meta' în unele medii
 const SOCKET_URL = "http://localhost:3001";
 const socket = io(SOCKET_URL, { autoConnect: false });
 
@@ -35,7 +37,7 @@ const TriviaModal = ({ data, onAnswer }) => {
       <div className="bg-slate-800 border-2 border-yellow-500 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative flex flex-col items-center">
         {/* Dynamic Category Header */}
         <div className="absolute -top-5 bg-yellow-500 text-slate-900 px-6 py-1 rounded-full font-extrabold uppercase tracking-wider shadow-[0_0_15px_rgba(234,179,8,0.6)] text-sm md:text-base">
-          {category || "General Knowledge"}
+          {category || "Cultură Generală"}
         </div>
 
         {/* Question Display */}
@@ -63,9 +65,7 @@ const TriviaModal = ({ data, onAnswer }) => {
         <div className="mt-8 h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
           <div className="h-full bg-gradient-to-r from-yellow-500 to-red-500 w-full animate-[width_15s_linear_forwards]"></div>
         </div>
-        <p className="text-xs text-slate-500 mt-2 font-mono">
-          Time is ticking...
-        </p>
+        <p className="text-xs text-slate-500 mt-2 font-mono">Timpul trece...</p>
       </div>
     </div>
   );
@@ -282,7 +282,7 @@ const BrasovMap = ({
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
-  const [userId, setUserId] = useState(null); // Replaces socketId for logic
+  const [userId, setUserId] = useState(null);
 
   // Game Data
   const [territories, setTerritories] = useState({});
@@ -300,7 +300,7 @@ function App() {
   // Login Data
   const [hasJoined, setHasJoined] = useState(false);
   const [playerName, setPlayerName] = useState("");
-  const [roomCode, setRoomCode] = useState("brasov1"); // Default room
+  const [roomCode, setRoomCode] = useState("brasov1");
   const [selectedColor, setSelectedColor] = useState(PLAYER_COLORS[0].hex);
 
   useEffect(() => {
@@ -311,16 +311,12 @@ function App() {
       socket.auth = { sessionID };
       socket.connect();
     } else {
-      // Just connect to get a new session
       socket.connect();
     }
 
     socket.on("session", ({ sessionID, userID }) => {
-      // 2. Attach session ID to next reconnection attempts
       socket.auth = { sessionID };
-      // 3. Store in localStorage
       localStorage.setItem("sessionID", sessionID);
-      // 4. Save the persistent user ID
       socket.userID = userID;
       setUserId(userID);
     });
@@ -335,7 +331,6 @@ function App() {
     socket.on("update_map", setTerritories);
     socket.on("update_players", (newPlayers) => {
       setPlayers(newPlayers);
-      // If we receive player data containing our ID, it means we rejoined successfully
       if (socket.userID && newPlayers[socket.userID]) {
         setHasJoined(true);
         setPlayerName(newPlayers[socket.userID].name);
@@ -372,17 +367,67 @@ function App() {
     setHasJoined(true);
   };
 
+  const handleLeaveGame = () => {
+    // 1. Ștergem sesiunea locală
+    localStorage.removeItem("sessionID");
+
+    // 2. Resetăm autentificarea socket-ului pentru a nu refolosi vechiul ID
+    socket.auth = {};
+
+    // 3. Deconectăm socket-ul curent (serverul va vedea asta ca un disconnect normal)
+    socket.disconnect();
+
+    // 4. Resetăm starea UI
+    setHasJoined(false);
+    setPlayerName("");
+    setRoomCode("");
+    setPlayers({});
+    setTerritories({});
+    setGameState({
+      status: "LOBBY",
+      phase: "",
+      turnIndex: 0,
+      playerIds: [],
+      battleRound: 0,
+    });
+
+    // 5. Reconectăm pentru a obține o nouă sesiune curată
+    socket.connect();
+  };
+
   const handleAnswerSubmit = (index) => socket.emit("submit_answer", index);
   const handleTerritoryClick = (id) => socket.emit("initiate_attack", id);
 
   // Helpers
-  // Use 'userId' instead of 'socket.id' because socket.id changes on reconnect
   const isMyTurn =
     gameState.status === "PLAYING" &&
     gameState.playerIds[gameState.turnIndex] === userId;
 
   const currentPlayerName =
     players[gameState.playerIds[gameState.turnIndex]]?.name || "Unknown";
+
+  // Verifică dacă adversarul este deconectat
+  const opponent = Object.values(players).find((p) => p.id !== userId);
+  const isOpponentOffline =
+    gameState.status === "PLAYING" && opponent && !opponent.online;
+
+  // New logic: Check if the game has ended due to opponent disconnection (forfeit)
+  const isGameFinishedByForfeit =
+    gameState.status === "FINISHED" &&
+    gameState.winner &&
+    gameState.winner.includes("(Opponent disconnected)");
+
+  // Effect to handle automatic exit on forfeit
+  useEffect(() => {
+    if (isGameFinishedByForfeit) {
+      // Option 1: Show alert then leave
+      alert(`Game Over! ${gameState.winner}`);
+      handleLeaveGame();
+
+      // Option 2: Just leave immediately (uncomment below if preferred)
+      // handleLeaveGame();
+    }
+  }, [isGameFinishedByForfeit]);
 
   // LOGIN SCREEN
   if (!hasJoined) {
@@ -401,7 +446,7 @@ function App() {
               {/* Name Input */}
               <div>
                 <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2 block">
-                  Name
+                  Nume
                 </label>
                 <div className="relative">
                   <User
@@ -418,10 +463,10 @@ function App() {
                 </div>
               </div>
 
-              {/* Room Code Input (NEW) */}
+              {/* Room Code Input */}
               <div>
                 <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2 block">
-                  Room Code
+                  Cod Cameră
                 </label>
                 <div className="relative">
                   <Hash
@@ -437,14 +482,14 @@ function App() {
                   />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Share this code with a friend to play together.
+                  Împarte acest cod cu un prieten pentru a juca împreună.
                 </p>
               </div>
 
               {/* Color Selection */}
               <div>
                 <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 block">
-                  Choose your faction
+                  Alege facțiunea
                 </label>
                 <div className="flex gap-4 flex-wrap">
                   {PLAYER_COLORS.map((c) => (
@@ -468,7 +513,7 @@ function App() {
                 disabled={!playerName || !roomCode}
                 className="w-full bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-black py-4 rounded-xl text-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-95 mt-4"
               >
-                ENTER BATTLE
+                INTRĂ ÎN LUPTĂ
               </button>
             </form>
 
@@ -478,7 +523,7 @@ function App() {
                   isConnected ? "bg-green-500" : "bg-red-500"
                 }`}
               ></div>
-              Status: {isConnected ? "Server Online" : "Connecting..."}
+              Status: {isConnected ? "Server Online" : "Se conectează..."}
             </div>
           </div>
         </div>
@@ -502,15 +547,23 @@ function App() {
   // --- LOBBY (WAITING) ---
   if (gameState.status === "LOBBY") {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4 relative">
+        {/* Buton Iesire Lobby */}
+        <button
+          onClick={handleLeaveGame}
+          className="absolute top-6 right-6 flex items-center gap-2 text-red-400 hover:text-red-300 font-bold bg-slate-800 px-4 py-2 rounded-lg border border-red-500/30 transition-all hover:border-red-500"
+        >
+          <LogOut size={18} /> Ieși
+        </button>
+
         <div className="bg-slate-800/50 p-10 rounded-3xl border border-slate-700 text-center max-w-2xl w-full backdrop-blur-sm">
           <div className="mb-6 inline-block p-4 bg-slate-900 rounded-full border border-slate-600">
             <Swords size={48} className="text-yellow-500 animate-pulse" />
           </div>
           <h2 className="text-3xl font-bold mb-2">
-            Room: <span className="text-yellow-400">{roomCode}</span>
+            Camera: <span className="text-yellow-400">{roomCode}</span>
           </h2>
-          <p className="text-slate-400 mb-8">Waiting for opponent...</p>
+          <p className="text-slate-400 mb-8">Se așteaptă adversarul...</p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             {Object.values(players).map((p) => (
@@ -520,7 +573,7 @@ function App() {
               >
                 {!p.online && (
                   <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-red-400 font-bold text-xs uppercase tracking-widest">
-                    Disconnected
+                    Deconectat
                   </div>
                 )}
                 <div
@@ -534,7 +587,7 @@ function App() {
                       p.online ? "text-green-400" : "text-red-400"
                     }`}
                   >
-                    {p.online ? "READY" : "OFFLINE"}
+                    {p.online ? "PREGĂTIT" : "OFFLINE"}
                   </div>
                 </div>
               </div>
@@ -543,7 +596,7 @@ function App() {
             {Object.keys(players).length < 2 && (
               <div className="bg-slate-800/50 p-4 rounded-xl flex items-center gap-4 border-2 border-dashed border-slate-700 text-slate-500">
                 <div className="w-12 h-12 rounded-full bg-slate-800 animate-pulse"></div>
-                <div>Waiting...</div>
+                <div>Așteptare...</div>
               </div>
             )}
           </div>
@@ -555,13 +608,24 @@ function App() {
   // GAMEPLAY UI
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center font-sans relative overflow-x-hidden">
+      {/* BANNER DECONECTARE */}
+      {isOpponentOffline && (
+        <div className="w-full bg-red-600/90 text-white font-bold text-center py-2 animate-pulse flex items-center justify-center gap-2 z-50 sticky top-0">
+          <WifiOff size={20} />
+          <span>
+            Adversarul s-a deconectat! Dacă nu revine în 60s, câștigi prin
+            forfeit.
+          </span>
+        </div>
+      )}
+
       {currentQuestion && (
         <TriviaModal data={currentQuestion} onAnswer={handleAnswerSubmit} />
       )}
 
       {notification && (
         <div
-          className={`fixed top-24 z-[100] px-8 py-3 rounded-xl shadow-2xl font-black text-xl border-2 animate-bounce ${
+          className={`fixed top-32 z-[100] px-8 py-3 rounded-xl shadow-2xl font-black text-xl border-2 animate-bounce ${
             notification.success
               ? "bg-green-600 border-green-400"
               : "bg-red-600 border-red-400"
@@ -573,6 +637,8 @@ function App() {
 
       {/* HEADER */}
       <div className="w-full bg-slate-800 border-b border-slate-700 p-4 shadow-lg z-40 sticky top-0">
+        {" "}
+        {/* Adjusted sticky if banner is present */}
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="bg-slate-900 p-2 rounded-lg border border-slate-700">
@@ -583,7 +649,7 @@ function App() {
                 Room: {roomCode}
               </h1>
               <p className="text-xs text-slate-400 font-mono">
-                PHASE:{" "}
+                FAZA:{" "}
                 <span className="text-yellow-400 font-bold">
                   {gameState.phase}
                 </span>
@@ -604,13 +670,21 @@ function App() {
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
               </span>
             )}
-            {isMyTurn ? "YOUR TURN" : `Waiting: ${currentPlayerName}`}
+            {isMyTurn ? "RÂNDUL TĂU" : `Așteaptă: ${currentPlayerName}`}
           </div>
 
           <div className="hidden md:flex items-center gap-4">
+            <button
+              onClick={handleLeaveGame}
+              className="mr-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
+              title="Părăsește Jocul"
+            >
+              <LogOut size={20} />
+            </button>
+
             <div className="text-right">
               <p className="text-sm font-bold">{playerName}</p>
-              <p className="text-xs text-slate-400">Commander</p>
+              <p className="text-xs text-slate-400">Comandant</p>
             </div>
             <div
               className="w-10 h-10 rounded-full border-2 border-white"
@@ -643,7 +717,7 @@ function App() {
             <div className="bg-slate-900/50 p-4 border-b border-slate-700 flex items-center gap-2">
               <Trophy className="text-yellow-500" size={18} />
               <h3 className="font-bold text-slate-200 uppercase text-sm tracking-wider">
-                Leaderboard
+                Clasament
               </h3>
             </div>
             <div className="p-2">
@@ -656,7 +730,11 @@ function App() {
                       gameState.playerIds[gameState.turnIndex] === p.id
                         ? "bg-white/5 border border-white/10"
                         : ""
-                    } ${!p.online ? "opacity-50 grayscale" : ""}`}
+                    } ${
+                      !p.online
+                        ? "opacity-50 grayscale border-red-500/30 border"
+                        : ""
+                    }`}
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-slate-500 font-bold w-4 text-sm">
@@ -672,11 +750,11 @@ function App() {
                             p.id === userId ? "text-white" : "text-slate-400"
                           }`}
                         >
-                          {p.name} {p.id === userId && "(You)"}
+                          {p.name} {p.id === userId && "(Tu)"}
                         </div>
                         {!p.online && (
-                          <div className="text-[10px] text-red-500 font-bold">
-                            DISCONNECTED
+                          <div className="text-[10px] text-red-400 font-bold animate-pulse flex items-center gap-1">
+                            <WifiOff size={10} /> DECONECTAT
                           </div>
                         )}
                       </div>
@@ -692,12 +770,12 @@ function App() {
           {/* Instructions */}
           <div className="bg-blue-900/20 rounded-2xl border border-blue-500/20 p-5 text-sm text-blue-200/80">
             <h4 className="font-bold text-blue-400 mb-2 flex items-center gap-2">
-              <Swords size={16} /> Mission:
+              <Swords size={16} /> Misiune:
             </h4>
             <p>
               {gameState.phase === "EXPANSION"
-                ? "Conquer neutral (grey) territories."
-                : "Attack bordering enemies. Don't lose your land!"}
+                ? "Cucerește teritorii neutre (Gri)."
+                : "Atacă vecinii. Nu îți pierde pământul!"}
             </p>
           </div>
         </div>
