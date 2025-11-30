@@ -4,7 +4,8 @@ import BrasovMap from "./components/BrasovMap";
 import TriviaModal from "./components/TriviaModal";
 import { Trophy, Swords, Map as MapIcon, Crown, User } from "lucide-react";
 
-const socket = io.connect("http://localhost:3001");
+const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const socket = io.connect(SOCKET_URL);
 const PLAYER_COLORS = [
   { hex: "#ef4444", name: "Red" },
   { hex: "#3b82f6", name: "Blue" },
