@@ -2,10 +2,19 @@ import { useEffect, useState } from "react";
 import io from "socket.io-client";
 import BrasovMap from "./components/BrasovMap";
 import TriviaModal from "./components/TriviaModal";
-import { Trophy, Swords, Map as MapIcon, Crown, User } from "lucide-react";
+import {
+  Trophy,
+  Swords,
+  Map as MapIcon,
+  Crown,
+  User,
+  Hash,
+} from "lucide-react";
 
+// Initialize socket with autoConnect false to allow session setup
 const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
-const socket = io.connect(SOCKET_URL);
+const socket = io(SOCKET_URL, { autoConnect: false });
+
 const PLAYER_COLORS = [
   { hex: "#ef4444", name: "Red" },
   { hex: "#3b82f6", name: "Blue" },
@@ -17,7 +26,7 @@ const PLAYER_COLORS = [
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
-  const [socketId, setSocketId] = useState(null);
+  const [userId, setUserId] = useState(null); // Replaces socketId for logic
 
   // Game Data
   const [territories, setTerritories] = useState({});
@@ -35,16 +44,48 @@ function App() {
   // Login Data
   const [hasJoined, setHasJoined] = useState(false);
   const [playerName, setPlayerName] = useState("");
+  const [roomCode, setRoomCode] = useState("brasov1"); // Default room
   const [selectedColor, setSelectedColor] = useState(PLAYER_COLORS[0].hex);
 
   useEffect(() => {
+    // 1. Check for existing session on mount
+    const sessionID = localStorage.getItem("sessionID");
+
+    if (sessionID) {
+      socket.auth = { sessionID };
+      socket.connect();
+    } else {
+      // Just connect to get a new session
+      socket.connect();
+    }
+
+    socket.on("session", ({ sessionID, userID }) => {
+      // 2. Attach session ID to next reconnection attempts
+      socket.auth = { sessionID };
+      // 3. Store in localStorage
+      localStorage.setItem("sessionID", sessionID);
+      // 4. Save the persistent user ID
+      socket.userID = userID;
+      setUserId(userID);
+    });
+
     socket.on("connect", () => {
       setIsConnected(true);
-      setSocketId(socket.id);
     });
+
     socket.on("disconnect", () => setIsConnected(false));
+
+    // Game Updates
     socket.on("update_map", setTerritories);
-    socket.on("update_players", setPlayers);
+    socket.on("update_players", (newPlayers) => {
+      setPlayers(newPlayers);
+      // If we receive player data containing our ID, it means we rejoined successfully
+      if (socket.userID && newPlayers[socket.userID]) {
+        setHasJoined(true);
+        setPlayerName(newPlayers[socket.userID].name);
+        setSelectedColor(newPlayers[socket.userID].color);
+      }
+    });
     socket.on("update_gamestate", setGameState);
     socket.on("trivia_question", (q) => {
       setCurrentQuestion(q);
@@ -55,16 +96,23 @@ function App() {
       setNotification(res);
       setTimeout(() => setNotification(null), 3000);
     });
+
     return () => {
       socket.off("connect");
       socket.off("disconnect");
+      socket.off("session");
     };
   }, []);
 
-  const handleJoinGame = (e) => {
+  constWBhandleJoinGame = (e) => {
     e.preventDefault();
-    if (!playerName) return;
-    socket.emit("join_game", { name: playerName, color: selectedColor });
+    if (!playerName || !roomCode) return;
+
+    socket.emit("join_game", {
+      name: playerName,
+      color: selectedColor,
+      roomId: roomCode,
+    });
     setHasJoined(true);
   };
 
@@ -72,27 +120,29 @@ function App() {
   const handleTerritoryClick = (id) => socket.emit("initiate_attack", id);
 
   // Helpers
+  // Use 'userId' instead of 'socket.id' because socket.id changes on reconnect
   const isMyTurn =
     gameState.status === "PLAYING" &&
-    gameState.playerIds[gameState.turnIndex] === socketId;
+    gameState.playerIds[gameState.turnIndex] === userId;
+
   const currentPlayerName =
     players[gameState.playerIds[gameState.turnIndex]]?.name || "Unknown";
 
-  // LOGIN  ---
+  // LOGIN SCREEN
   if (!hasJoined) {
     return (
       <div className="min-h-screen w-full flex flex-col md:flex-row bg-slate-900">
-        {/* left part */}
         <div className="w-full md:w-1/2 flex flex-col justify-center items-center p-8 z-10 bg-slate-900 shadow-2xl">
           <div className="max-w-md w-full space-y-8">
             <div className="text-center md:text-left">
               <h1 className="text-4xl md:text-5xl font-black text-white mb-2 tracking-tight">
                 BRAȘOV <span className="text-yellow-400">CONQUEST</span>
               </h1>
-              <p className="text-slate-400 text-lg">Trivia game </p>
+              <p className="text-slate-400 text-lg">Multiplayer Strategy</p>
             </div>
 
             <form onSubmit={handleJoinGame} className="space-y-6 mt-8">
+              {/* Name Input */}
               <div>
                 <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2 block">
                   Name
@@ -104,7 +154,7 @@ function App() {
                   />
                   <input
                     className="w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-3 pl-10 text-white focus:border-yellow-400 focus:outline-none transition-all font-bold text-lg"
-                    placeholder="Ex: player"
+                    placeholder="Ex: Vlad Țepeș"
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
                     maxLength={15}
@@ -112,9 +162,33 @@ function App() {
                 </div>
               </div>
 
+              {/* Room Code Input (NEW) */}
+              <div>
+                <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2 block">
+                  Room Code
+                </label>
+                <div className="relative">
+                  <Hash
+                    className="absolute left-3 top-3.5 text-slate-500"
+                    size={20}
+                  />
+                  <input
+                    className="w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-3 pl-10 text-white focus:border-yellow-400 focus:outline-none transition-all font-bold text-lg uppercase"
+                    placeholder="Ex: BRASOV1"
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value)}
+                    maxLength={10}
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Share this code with a friend to play together.
+                </p>
+              </div>
+
+              {/* Color Selection */}
               <div>
                 <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 block">
-                  Choose your color
+                  Choose your faction
                 </label>
                 <div className="flex gap-4 flex-wrap">
                   {PLAYER_COLORS.map((c) => (
@@ -122,7 +196,7 @@ function App() {
                       key={c.hex}
                       type="button"
                       onClick={() => setSelectedColor(c.hex)}
-                      className={`w-12 h-12 rounded-full border-4 transition-all hover:scale-110 ${
+                      className={`w-12 h-12 rounded-fullQB border-4 transition-all hover:scale-110 ${
                         selectedColor === c.hex
                           ? "border-white shadow-[0_0_15px_rgba(255,255,255,0.5)] scale-110"
                           : "border-slate-700 opacity-60 hover:opacity-100"
@@ -135,10 +209,10 @@ function App() {
 
               <button
                 type="submit"
-                disabled={!playerName}
+                disabled={!playerName || !roomCode}
                 className="w-full bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-black py-4 rounded-xl text-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-95 mt-4"
               >
-                ENTER BATTLE {/* Translated from INTRĂ ÎN LUPTĂ */}
+                ENTER BATTLE
               </button>
             </form>
 
@@ -148,16 +222,15 @@ function App() {
                   isConnected ? "bg-green-500" : "bg-red-500"
                 }`}
               ></div>
-              Server Status: {isConnected ? "Online" : "Connecting..."}
+              Status: {isConnected ? "Server Online" : "Connecting..."}
             </div>
           </div>
         </div>
 
-        {/* Right part */}
+        {/* Right side background (Map visual) */}
         <div className="hidden md:flex w-1/2 bg-slate-800 relative overflow-hidden items-center justify-center p-10">
           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-          {}
-          <div className="w-full max-w-2xl transform rotate-3 hover:rotate-0 transition-transform duration-700 scale-110 opacity-90 pointer-events-none grayscale-[0.2]">
+          <div className="w-full max-w-2xl transform rotate-3 scale-110 opacity-40 grayscale pointer-events-none">
             <BrasovMap
               territories={territories}
               onTerritoryClick={() => {}}
@@ -165,15 +238,12 @@ function App() {
               currentPlayerId={null}
             />
           </div>
-          <div className="absolute bottom-10 text-slate-500 font-mono text-xs">
-            © 2025 Brașov Conquest • Multiplayer Strategy
-          </div>
         </div>
       </div>
     );
   }
 
-  // ---  LOBBY (WAITING) ---
+  // --- LOBBY (WAITING) ---
   if (gameState.status === "LOBBY") {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
@@ -181,27 +251,39 @@ function App() {
           <div className="mb-6 inline-block p-4 bg-slate-900 rounded-full border border-slate-600">
             <Swords size={48} className="text-yellow-500 animate-pulse" />
           </div>
-          <h2 className="text-3xl font-bold mb-2">Waiting Lobby</h2>{" "}
-          {/* Translated from Lobby de Așteptare */}
-          <p className="text-slate-400 mb-8">
-            Waiting for the second player to join...
-          </p>
+          <h2 className="text-3xl font-bold mb-2">
+            Room: <span className="text-yellow-400">{roomCode}</span>
+          </h2>
+          <p className="text-slate-400 mb-8">Waiting for opponent...</p>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             {Object.values(players).map((p) => (
               <div
                 key={p.id}
-                className="bg-slate-700 p-4 rounded-xl flex items-center gap-4 border-2 border-slate-600"
+                className="bg-slate-700 p-4 rounded-xl flex items-center gap-4 border-2 border-slate-600 relative overflow-hidden"
               >
+                {!p.online && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-red-400 font-bold text-xs uppercase tracking-widest">
+                    Disconnected
+                  </div>
+                )}
                 <div
                   className="w-12 h-12 rounded-full border-2 border-white shadow-lg"
                   style={{ backgroundColor: p.color }}
                 ></div>
                 <div className="text-left">
                   <div className="font-bold text-lg">{p.name}</div>
-                  <div className="text-xs text-slate-400 font-mono">READY</div>
+                  <div
+                    className={`text-xs font-mono ${
+                      p.online ? "text-green-400" : "text-red-400"
+                    }`}
+                  >
+                    {p.online ? "READY" : "OFFLINE"}
+                  </div>
                 </div>
               </div>
             ))}
+            {/* Placeholder for empty slot */}
             {Object.keys(players).length < 2 && (
               <div className="bg-slate-800/50 p-4 rounded-xl flex items-center gap-4 border-2 border-dashed border-slate-700 text-slate-500">
                 <div className="w-12 h-12 rounded-full bg-slate-800 animate-pulse"></div>
@@ -209,15 +291,12 @@ function App() {
               </div>
             )}
           </div>
-          <div className="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
-            <div className="h-full bg-yellow-500 w-1/2 animate-[pulse_2s_infinite]"></div>
-          </div>
         </div>
       </div>
     );
   }
 
-  //  GAMEPLAY (FULL WIDTH) ---
+  // GAMEPLAY UI (Rest remains largely the same, just ensure BrasovMap receives correct props)
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center font-sans relative overflow-x-hidden">
       {currentQuestion && (
@@ -236,7 +315,7 @@ function App() {
         </div>
       )}
 
-      {/* --- HEADER BAR */}
+      {/* HEADER */}
       <div className="w-full bg-slate-800 border-b border-slate-700 p-4 shadow-lg z-40 sticky top-0">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -245,7 +324,7 @@ function App() {
             </div>
             <div>
               <h1 className="font-bold text-lg leading-none">
-                Brașov Conquest
+                Room: {roomCode}
               </h1>
               <p className="text-xs text-slate-400 font-mono">
                 PHASE:{" "}
@@ -256,7 +335,6 @@ function App() {
             </div>
           </div>
 
-          {/* TURN INDICATOR */}
           <div
             className={`px-6 py-2 rounded-full border font-bold flex items-center gap-3 transition-all ${
               isMyTurn
@@ -276,48 +354,40 @@ function App() {
           <div className="hidden md:flex items-center gap-4">
             <div className="text-right">
               <p className="text-sm font-bold">{playerName}</p>
-              <p className="text-xs text-slate-400">Commander</p>{" "}
-              {/* Translated from Comandant */}
+              <p className="text-xs text-slate-400">Commander</p>
             </div>
             <div
-              className="w-10 h-10 rounded-full border-2 border-white"
+              className="w-10 h-10 rounded-fullQB border-2 border-white"
               style={{ backgroundColor: selectedColor }}
             ></div>
           </div>
         </div>
       </div>
 
-      {/* --- MAIN CONTENT GRID --- */}
+      {/* GAME CONTENT */}
       <div className="flex flex-col lg:flex-row w-full max-w-[1600px] gap-6 p-4 flex-grow">
-        {/* LEFT: MAP (Flex Grow) */}
+        {/* MAP */}
         <div
           className={`flex-1 bg-slate-800/30 rounded-3xl border border-slate-700/50 p-2 md:p-6 transition-opacity duration-500 relative ${
-            !isMyTurn ? "opacity-70" : ""
+            !isMyTurn ? "opacity-90" : ""
           }`}
         >
-          {!isMyTurn && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-              <div className="bg-black/50 backdrop-blur-sm px-6 py-2 rounded-full text-white font-bold border border-white/20">
-                Waiting for your turn...
-              </div>
-            </div>
-          )}
           <BrasovMap
             territories={territories}
             onTerritoryClick={handleTerritoryClick}
             players={players}
-            currentPlayerId={socketId}
+            currentPlayerId={userId}
           />
         </div>
 
-        {/* RIGHT: LEADERBOARD & INFO (Fixed width on large screens) */}
+        {/* SIDEBAR */}
         <div className="w-full lg:w-80 flex flex-col gap-4">
-          {/* Leaderboard Panel */}
+          {/* Leaderboard */}
           <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-xl">
             <div className="bg-slate-900/50 p-4 border-b border-slate-700 flex items-center gap-2">
               <Trophy className="text-yellow-500" size={18} />
               <h3 className="font-bold text-slate-200 uppercase text-sm tracking-wider">
-                Leaderboard {/* Translated from Clasament */}
+                Leaderboard
               </h3>
             </div>
             <div className="p-2">
@@ -326,18 +396,14 @@ function App() {
                 .map((p, i) => (
                   <div
                     key={p.id}
-                    className={`flex items-center justify-between p-3 rounded-xl mb-1 transition-colors ${
+                    className={`flex items-center justify-between p-3 rounded-xl mb-1 ${
                       gameState.playerIds[gameState.turnIndex] === p.id
                         ? "bg-white/5 border border-white/10"
-                        : "hover:bg-slate-700/50"
-                    }`}
+                        : ""
+                    } ${!p.online ? "opacity-50 grayscale" : ""}`}
                   >
                     <div className="flex items-center gap-3">
-                      <span
-                        className={`text-sm font-bold w-4 ${
-                          i === 0 ? "text-yellow-400" : "text-slate-500"
-                        }`}
-                      >
+                      <span className="text-slate-500 font-bold w-4 text-sm">
                         {i + 1}
                       </span>
                       <div
@@ -347,14 +413,14 @@ function App() {
                       <div>
                         <div
                           className={`text-sm font-bold ${
-                            p.id === socketId ? "text-white" : "text-slate-400"
+                            p.id === userId ? "text-white" : "text-slate-400"
                           }`}
                         >
-                          {p.name}
+                          {p.name} {p.id === userId && "(You)"}
                         </div>
-                        {gameState.playerIds[gameState.turnIndex] === p.id && (
-                          <div className="text-[10px] text-green-400 font-mono leading-none">
-                            ACTIVE TURN
+                        {!p.online && (
+                          <div className="text-[10px] text-red-500 font-bold">
+                            DISCONNECTED
                           </div>
                         )}
                       </div>
@@ -367,22 +433,16 @@ function App() {
             </div>
           </div>
 
-          {/* Instructions Panel */}
+          {/* Instructions */}
           <div className="bg-blue-900/20 rounded-2xl border border-blue-500/20 p-5 text-sm text-blue-200/80">
             <h4 className="font-bold text-blue-400 mb-2 flex items-center gap-2">
-              <Swords size={16} /> Current Mission:
+              <Swords size={16} /> Mission:
             </h4>
-            {gameState.phase === "EXPANSION" ? (
-              <p>
-                Conquer neutral territories (Grey). Answer questions correctly
-                to accumulate points and land.
-              </p>
-            ) : (
-              <p>
-                Attack enemy neighbors! You can only attack territories that
-                border your own.
-              </p>
-            )}
+            <p>
+              {gameState.phase === "EXPANSION"
+                ? "Conquer neutral (grey) territories."
+                : "Attack bordering enemies. Don't lose your land!"}
+            </p>
           </div>
         </div>
       </div>

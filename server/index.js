@@ -1,10 +1,15 @@
+// server/index.js
+require("dotenv").config(); // Load environment variables
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const axios = require("axios");
 const he = require("he");
+const crypto = require("crypto");
+const mongoose = require("mongoose");
 const neighbors = require("./neighbors");
+const { Session, Game } = require("./models"); // Import DB models
 
 // --- SERVER CONFIG ---
 const app = express();
@@ -13,29 +18,23 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow any connection (for easier deployment)
+    origin: "*", // Allow connections from Vercel
     methods: ["GET", "POST"],
   },
 });
 
-// --- GLOBAL VARIABLES ---
-let players = {}; // { socketId: { name, color, score } }
-let gameMap = resetMap(); // Empty map
-let activeBattles = {}; // Current active battle
+// --- DATABASE CONNECTION ---
+// Connect to MongoDB Atlas
+mongoose
+  .connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/brasov_conquest")
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
-// GAME STATE
-let gameState = {
-  status: "LOBBY", // LOBBY, PLAYING, FINISHED
-  phase: "EXPANSION", // EXPANSION (neutral zones), BATTLE (PvP)
-  playerIds: [], // Player order ['id1', 'id2']
-  turnIndex: 0, // Current player index
-  battleRound: 0, // Round counter for BATTLE phase
-  maxBattleRounds: 10, // Round limit
-  winner: null,
-};
+// --- HELPERS ---
+const randomId = () => crypto.randomBytes(8).toString("hex");
 
-function resetMap() {
-  // Zone IDs matching BrasovMap.jsx
+// Helper to create initial game state
+function getInitialGameState() {
   const zones = [
     "stupini",
     "bartolomeu_nord",
@@ -52,12 +51,26 @@ function resetMap() {
     "noua",
     "poiana",
   ];
-  let map = {};
+  const map = {};
   zones.forEach((z) => (map[z] = { owner: null }));
-  return map;
+
+  return {
+    players: {},
+    gameMap: map,
+    activeBattles: {},
+    state: {
+      status: "LOBBY",
+      phase: "EXPANSION",
+      playerIds: [],
+      turnIndex: 0,
+      battleRound: 0,
+      maxBattleRounds: 10,
+      winner: null,
+    },
+  };
 }
 
-// --- TRIVIA API LOGIC ---
+// Trivia API
 async function getGameQuestion() {
   try {
     const res = await axios.get(
@@ -85,85 +98,143 @@ async function getGameQuestion() {
   }
 }
 
-// --- TURN & PHASE LOGIC ---
-function nextTurn() {
-  // 1. Switch player
-  gameState.turnIndex = (gameState.turnIndex + 1) % gameState.playerIds.length;
+// --- MIDDLEWARE: SESSION MANAGEMENT ---
+// This runs before connection to identify the user
+io.use(async (socket, next) => {
+  const sessionID = socket.handshake.auth.sessionID;
 
-  // 2. Check phase change: EXPANSION -> BATTLE
-  if (gameState.phase === "EXPANSION") {
-    const isMapFull = Object.values(gameMap).every((t) => t.owner !== null);
-    if (isMapFull) {
-      gameState.phase = "BATTLE";
-      gameState.battleRound = 1;
-      console.log("🚀 PHASE CHANGE: BATTLE MODE STARTED!");
-    }
-  }
-  // 3. If BATTLE, increment round counter
-  else if (gameState.phase === "BATTLE") {
-    // Increment only when turn loops back to first player
-    if (gameState.turnIndex === 0) {
-      gameState.battleRound++;
-    }
-
-    // 4. CHECK GAME OVER (Round limit)
-    if (gameState.battleRound > gameState.maxBattleRounds) {
-      endGame();
-      return;
+  if (sessionID) {
+    // Look up session in MongoDB
+    const session = await Session.findOne({ sessionId: sessionID });
+    if (session) {
+      socket.sessionID = sessionID;
+      socket.userID = session.userId;
+      socket.roomId = session.roomId;
+      return next();
     }
   }
 
-  // Broadcast new state
-  io.emit("update_gamestate", gameState);
-}
+  // Create new identifiers (saved to DB only when joining a game)
+  socket.sessionID = randomId();
+  socket.userID = randomId();
+  next();
+});
 
-function endGame() {
-  gameState.status = "FINISHED";
+// --- SOCKET HANDLERS ---
+io.on("connection", async (socket) => {
+  // 1. Send session details to client so they can save to localStorage
+  socket.emit("session", {
+    sessionID: socket.sessionID,
+    userID: socket.userID,
+  });
 
-  // Determine winner
-  const p1Id = gameState.playerIds[0];
-  const p2Id = gameState.playerIds[1];
+  // 2. Handle Automatic Reconnection
+  // If user was in a room, find that room in DB and send state
+  if (socket.roomId) {
+    const game = await Game.findOne({ roomId: socket.roomId });
 
-  // Higher score wins
-  if (players[p1Id].score > players[p2Id].score)
-    gameState.winner = players[p1Id].name;
-  else if (players[p2Id].score > players[p1Id].score)
-    gameState.winner = players[p2Id].name;
-  else gameState.winner = "Draw";
+    if (game) {
+      socket.join(socket.roomId);
 
-  io.emit("update_gamestate", gameState);
-}
+      // Mark player as online in DB
+      if (game.players && game.players[socket.userID]) {
+        game.players[socket.userID].online = true;
+        // Optimization: We use markModified because 'players' is a Mixed Object
+        game.markModified("players");
+        await game.save();
+      }
 
-io.on("connection", (socket) => {
-  console.log(`✅ Connected: ${socket.id}`);
+      // Sync Client
+      socket.emit("update_players", game.players);
+      socket.emit("update_map", game.gameMap);
+      socket.emit("update_gamestate", game.state);
 
-  socket.on("join_game", ({ name, color }) => {
-    // Add player
-    players[socket.id] = { id: socket.id, name, color, score: 0 };
-    if (!gameState.playerIds.includes(socket.id)) {
-      gameState.playerIds.push(socket.id);
+      console.log(
+        `🔄 User ${socket.userID} reconnected to DB room ${socket.roomId}`
+      );
+    }
+  }
+
+  // --- EVENTS ---
+
+  socket.on("join_game", async ({ name, color, roomId }) => {
+    if (!name || !roomId) return;
+    const cleanRoomId = roomId.toUpperCase(); // Normalize room codes
+
+    socket.join(cleanRoomId);
+    socket.roomId = cleanRoomId;
+
+    // Save/Update Session in MongoDB
+    await Session.findOneAndUpdate(
+      { sessionId: socket.sessionID },
+      {
+        sessionId: socket.sessionID,
+        userId: socket.userID,
+        roomId: cleanRoomId,
+      },
+      { upsert: true, new: true }
+    );
+
+    // Find or Create Game in MongoDB
+    let game = await Game.findOne({ roomId: cleanRoomId });
+    if (!game) {
+      const initialData = getInitialGameState();
+      game = new Game({
+        roomId: cleanRoomId,
+        ...initialData,
+      });
+      console.log(`✨ Created new room in DB: ${cleanRoomId}`);
     }
 
-    // If 2 players, START GAME
-    if (gameState.playerIds.length === 2 && gameState.status === "LOBBY") {
-      gameState.status = "PLAYING";
-      gameState.phase = "EXPANSION";
-      gameState.turnIndex = 0; // First to join starts
-      console.log("🎮 GAME START!");
+    // Add Player logic
+    if (!game.players[socket.userID]) {
+      // New Player
+      game.players[socket.userID] = {
+        id: socket.userID,
+        name,
+        color,
+        score: 0,
+        online: true,
+      };
+      game.state.playerIds.push(socket.userID);
+    } else {
+      // Update existing player
+      game.players[socket.userID].online = true;
+      game.players[socket.userID].name = name;
+      game.players[socket.userID].color = color;
     }
 
-    // Update everyone
-    io.emit("update_players", players);
-    io.emit("update_map", gameMap);
-    io.emit("update_gamestate", gameState);
+    // Check Start Condition
+    if (game.state.playerIds.length === 2 && game.state.status === "LOBBY") {
+      game.state.status = "PLAYING";
+      game.state.phase = "EXPANSION";
+      game.state.turnIndex = 0;
+      console.log(`🎮 Game Started in room ${cleanRoomId}`);
+    }
+
+    // Save Game & Broadcast
+    game.markModified("players");
+    game.markModified("state");
+    await game.save();
+
+    io.to(cleanRoomId).emit("update_players", game.players);
+    io.to(cleanRoomId).emit("update_map", game.gameMap);
+    io.to(cleanRoomId).emit("update_gamestate", game.state);
   });
 
   socket.on("initiate_attack", async (territoryId) => {
-    // A. BASIC VALIDATION (Is it your turn?)
-    if (gameState.status !== "PLAYING") return;
+    if (!socket.roomId) return;
 
-    const currentPlayerId = gameState.playerIds[gameState.turnIndex];
-    if (socket.id !== currentPlayerId) {
+    // Fetch latest state from DB to ensure sync
+    const game = await Game.findOne({ roomId: socket.roomId });
+    if (!game) return;
+
+    const userId = socket.userID;
+
+    // Validation
+    if (game.state.status !== "PLAYING") return;
+    const currentPlayerId = game.state.playerIds[game.state.turnIndex];
+    if (userId !== currentPlayerId) {
       socket.emit("battle_result", {
         success: false,
         message: "Wait for your turn!",
@@ -171,123 +242,144 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // --- STRATEGY LOGIC ---
-
-    // 1. Check existing territories
-    const playerTerritories = Object.keys(gameMap).filter(
-      (k) => gameMap[k].owner === socket.id
+    // Strategy Validation
+    const playerTerritories = Object.keys(game.gameMap).filter(
+      (k) => game.gameMap[k].owner === userId
     );
     const hasTerritories = playerTerritories.length > 0;
 
-    // 2. GOLDEN RULE: EXPAND ONLY TO NEIGHBORS
-    // Only applies if you already own land.
     if (hasTerritories) {
       let validNeighbors = new Set();
-
-      // Collect all neighbors of owned territories
       playerTerritories.forEach((t) => {
         (neighbors[t] || []).forEach((n) => validNeighbors.add(n));
       });
-
-      // If target is not a neighbor -> ERROR
       if (!validNeighbors.has(territoryId)) {
         socket.emit("battle_result", {
           success: false,
-          message: "Too far! You must expand from your borders.",
-        });
-        return;
-      }
-    }
-    // NOTE: If hasTerritories is false (first turn), allow landing anywhere.
-
-    // 3. PHASE SPECIFIC VALIDATION
-    const targetOwner = gameMap[territoryId].owner;
-
-    if (gameState.phase === "EXPANSION") {
-      // Expansion: Attack empty zones only
-      if (targetOwner !== null) {
-        socket.emit("battle_result", {
-          success: false,
-          message: "Expansion Phase: Attack empty zones only!",
-        });
-        return;
-      }
-    } else if (gameState.phase === "BATTLE") {
-      // Battle: Don't attack yourself
-      if (targetOwner === socket.id) {
-        socket.emit("battle_result", {
-          success: false,
-          message: "Don't attack yourself!",
+          message: "Too far! Must border your lands.",
         });
         return;
       }
     }
 
-    // D. START TRIVIA (If all rules passed)
-    const q = await getGameQuestion();
-
-    // Safety check if API fails
-    if (!q) {
+    const targetOwner = game.gameMap[territoryId].owner;
+    if (game.state.phase === "EXPANSION" && targetOwner !== null) {
       socket.emit("battle_result", {
         success: false,
-        message: "System Error. Try again.",
+        message: "Expansion Phase: Empty zones only!",
+      });
+      return;
+    } else if (game.state.phase === "BATTLE" && targetOwner === userId) {
+      socket.emit("battle_result", {
+        success: false,
+        message: "Don't attack yourself!",
       });
       return;
     }
 
-    activeBattles[socket.id] = { territoryId, correctIndex: q.correctIndex };
-    socket.emit("trivia_question", {
-      question: q.question,
-      options: q.options,
-      category: q.category,
-    });
+    // Get Question
+    const q = await getGameQuestion();
+    if (!q) {
+      socket.emit("battle_result", { success: false, message: "API Error." });
+      return;
+    }
+
+    // Save Battle in DB
+    game.activeBattles[userId] = { territoryId, correctIndex: q.correctIndex };
+    game.markModified("activeBattles");
+    await game.save();
+
+    socket.emit("trivia_question", q);
   });
 
-  socket.on("submit_answer", (answerIndex) => {
-    const battle = activeBattles[socket.id];
+  socket.on("submit_answer", async (answerIndex) => {
+    if (!socket.roomId) return;
+    const game = await Game.findOne({ roomId: socket.roomId });
+    if (!game) return;
+
+    const userId = socket.userID;
+    const battle = game.activeBattles[userId];
     if (!battle) return;
 
     const isCorrect = answerIndex === battle.correctIndex;
     const territoryId = battle.territoryId;
 
     if (isCorrect) {
-      // 1. Update Map
-      gameMap[territoryId].owner = socket.id;
-
-      // 2. Award Points
-      players[socket.id].score += gameState.phase === "EXPANSION" ? 100 : 300; // More points in battle
+      // Logic for capture
+      game.gameMap[territoryId].owner = userId;
+      game.players[userId].score +=
+        game.state.phase === "EXPANSION" ? 100 : 300;
 
       socket.emit("battle_result", { success: true, message: "Victory!" });
-      io.emit("update_map", gameMap);
-      io.emit("update_players", players);
+
+      game.markModified("gameMap");
+      game.markModified("players");
     } else {
       socket.emit("battle_result", {
         success: false,
-        message: "Wrong Answer! Turn lost.",
+        message: "Wrong Answer!",
       });
     }
 
-    delete activeBattles[socket.id];
+    // Clear battle
+    delete game.activeBattles[userId];
+    game.markModified("activeBattles");
 
-    // NEXT TURN REGARDLESS OF RESULT
-    nextTurn();
+    // Next Turn
+    game.state.turnIndex =
+      (game.state.turnIndex + 1) % game.state.playerIds.length;
+
+    // Check Phase Change
+    if (game.state.phase === "EXPANSION") {
+      const isMapFull = Object.values(game.gameMap).every(
+        (t) => t.owner !== null
+      );
+      if (isMapFull) {
+        game.state.phase = "BATTLE";
+        game.state.battleRound = 1;
+      }
+    } else if (game.state.phase === "BATTLE") {
+      if (game.state.turnIndex === 0) game.state.battleRound++;
+
+      // Game Over Condition
+      if (game.state.battleRound > game.state.maxBattleRounds) {
+        game.state.status = "FINISHED";
+        const pIds = game.state.playerIds;
+        const p1 = game.players[pIds[0]];
+        const p2 = game.players[pIds[1]];
+
+        let w = "Draw";
+        if (p1.score > p2.score) w = p1.name;
+        if (p2.score > p1.score) w = p2.name;
+        game.state.winner = w;
+      }
+    }
+
+    game.markModified("state");
+    await game.save(); // Persist changes
+
+    // Broadcast updates
+    io.to(socket.roomId).emit("update_map", game.gameMap);
+    io.to(socket.roomId).emit("update_players", game.players);
+    io.to(socket.roomId).emit("update_gamestate", game.state);
   });
 
-  socket.on("disconnect", () => {
-    console.log(`❌ Disconnected: ${socket.id}`);
-    delete players[socket.id];
-    gameState.playerIds = gameState.playerIds.filter((id) => id !== socket.id);
+  socket.on("disconnect", async () => {
+    // On disconnect, we just mark them offline in DB, we DO NOT delete the game
+    if (socket.roomId && socket.userID) {
+      console.log(`❌ User ${socket.userID} disconnected`);
 
-    // Reset if a player leaves during game
-    if (gameState.status === "PLAYING") {
-      gameState.status = "LOBBY";
-      gameMap = resetMap();
-      io.emit("update_gamestate", gameState);
-      io.emit("update_map", gameMap);
+      const game = await Game.findOne({ roomId: socket.roomId });
+      if (game && game.players[socket.userID]) {
+        game.players[socket.userID].online = false;
+        game.markModified("players");
+        await game.save();
+
+        io.to(socket.roomId).emit("update_players", game.players);
+      }
     }
-    io.emit("update_players", players);
   });
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log(`Strategy Server running on ${PORT}`));
