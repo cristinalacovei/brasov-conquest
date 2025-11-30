@@ -12,9 +12,9 @@ import {
 } from "lucide-react";
 
 // --- CONFIGURATION ---
-// Folosim direct URL-ul local pentru a evita erorile de 'import.meta' în unele medii
-const SOCKET_URL = "http://localhost:3001";
-const socket = io(SOCKET_URL, { autoConnect: false });
+
+const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const socket = io.connect(SOCKET_URL);
 
 const PLAYER_COLORS = [
   { hex: "#ef4444", name: "Red" },
