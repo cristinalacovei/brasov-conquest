@@ -5,20 +5,26 @@ const mongoose = require("mongoose");
 const sessionSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, unique: true },
   userId: { type: String, required: true },
-  roomId: { type: String }, // Which room is this user currently in?
-  createdAt: { type: Date, default: Date.now, expires: 86400 }, // Auto-delete after 24h
+  roomId: { type: String },
+  createdAt: { type: Date, default: Date.now, expires: 86400 },
 });
 
 // Schema for Game Rooms
 const gameSchema = new mongoose.Schema({
   roomId: { type: String, required: true, unique: true },
-  players: { type: Object, default: {} }, // Stores { userId: { name, color, score, online } }
-  gameMap: { type: Object, default: {} }, // Stores territories ownership
-  activeBattles: { type: Object, default: {} }, // Current trivia battles
+  players: { type: Object, default: {} },
+  gameMap: { type: Object, default: {} },
+  activeBattles: { type: Object, default: {} },
+  // --- ADĂUGAT AICI ---
+  settings: {
+    mode: { type: String, default: "MULTI" }, // 'MULTI' sau 'SINGLEPLAYER'
+    difficulty: { type: String, default: "MEDIUM" }, // 'EASY', 'MEDIUM', 'HARD'
+  },
+  // --------------------
   state: {
     status: { type: String, default: "LOBBY" },
     phase: { type: String, default: "EXPANSION" },
-    playerIds: [String], // Array of userIds
+    playerIds: [String],
     turnIndex: { type: Number, default: 0 },
     battleRound: { type: Number, default: 0 },
     maxBattleRounds: { type: Number, default: 10 },

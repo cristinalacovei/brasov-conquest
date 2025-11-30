@@ -1,18 +1,18 @@
 import React, { useEffect, useState } from "react";
 import io from "socket.io-client";
-import {
-  Trophy,
-  Swords,
-  Map as MapIcon,
-  Crown,
-  User,
-  Hash,
-  LogOut,
-  WifiOff,
-} from "lucide-react";
+import { MessageCircle, X, WifiOff } from "lucide-react";
+
+import GameMenu from "./components/GameMenu";
+import GameSetup from "./components/GameSetup";
+import GameLobby from "./components/GameLobby";
+import GameHeader from "./components/GameHeader";
+import BrasovMap from "./components/BrasovMap";
+import GameSidebar from "./components/GameSidebar";
+import ChatWindow from "./components/ChatWindow";
+import TriviaModal from "./components/TriviaModal";
+import GameOverModal from "./components/GameOverModal";
 
 // --- CONFIGURATION ---
-
 const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 const socket = io.connect(SOCKET_URL);
 
@@ -24,261 +24,6 @@ const PLAYER_COLORS = [
   { hex: "#f97316", name: "Orange" },
   { hex: "#eab308", name: "Yellow" },
 ];
-
-// --- COMPONENTS ---
-
-const TriviaModal = ({ data, onAnswer }) => {
-  if (!data) return null;
-
-  const { category, question, options } = data;
-
-  return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-slate-800 border-2 border-yellow-500 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative flex flex-col items-center">
-        {/* Dynamic Category Header */}
-        <div className="absolute -top-5 bg-yellow-500 text-slate-900 px-6 py-1 rounded-full font-extrabold uppercase tracking-wider shadow-[0_0_15px_rgba(234,179,8,0.6)] text-sm md:text-base">
-          {category || "Cultură Generală"}
-        </div>
-
-        {/* Question Display */}
-        <h3 className="text-xl md:text-2xl text-white font-bold text-center mt-6 mb-8 leading-relaxed">
-          {question}
-        </h3>
-
-        {/* Answer Options Grid */}
-        <div className="grid grid-cols-1 gap-3 w-full">
-          {options.map((option, index) => (
-            <button
-              key={index}
-              onClick={() => onAnswer(index)}
-              className="w-full p-4 bg-slate-700 hover:bg-blue-600 text-white font-semibold rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-95 text-left border border-slate-600 hover:border-blue-400 shadow-md group"
-            >
-              <span className="opacity-50 mr-3 font-mono text-yellow-400 group-hover:text-white transition-colors">
-                {index + 1}.
-              </span>
-              {option}
-            </button>
-          ))}
-        </div>
-
-        {/* Visual Timer Bar */}
-        <div className="mt-8 h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-yellow-500 to-red-500 w-full animate-[width_15s_linear_forwards]"></div>
-        </div>
-        <p className="text-xs text-slate-500 mt-2 font-mono">Timpul trece...</p>
-      </div>
-    </div>
-  );
-};
-
-const BrasovMap = ({
-  territories,
-  onTerritoryClick,
-  players,
-  currentPlayerId,
-}) => {
-  // Coloring logic: Retrieve owner color from players list
-  const getFillColor = (territoryId) => {
-    const ownerId = territories[territoryId]?.owner;
-
-    if (ownerId && players[ownerId]) {
-      return players[ownerId].color; // Player's specific color
-    }
-
-    return "#e2e8f0"; // Grey (Neutral)
-  };
-
-  // Styling logic: Highlight territories owned by the current player
-  const getPathClass = (territoryId) => {
-    const ownerId = territories[territoryId]?.owner;
-    const isMine = ownerId === currentPlayerId;
-
-    let base =
-      "cursor-pointer transition-all duration-300 hover:brightness-110 ";
-
-    if (isMine) {
-      // Add thicker white stroke for my territories
-      return base + "stroke-white stroke-[3px] z-10 relative";
-    } else {
-      return base + "stroke-slate-400 stroke-1 hover:stroke-2";
-    }
-  };
-
-  const textClass =
-    "fill-slate-900 font-extrabold text-[11px] pointer-events-none select-none uppercase drop-shadow-md";
-
-  // Zone Definitions (Brașov Neighborhoods)
-  const zones = [
-    {
-      id: "stupini",
-      name: "Stupini",
-      d: "M 150 20 L 450 20 L 460 150 L 320 180 L 150 140 Z",
-      textX: 300,
-      textY: 90,
-    },
-    {
-      id: "bartolomeu_nord",
-      name: "Bartolomeu N.",
-      d: "M 150 140 L 320 180 L 280 240 L 100 200 Z",
-      textX: 210,
-      textY: 190,
-    },
-    {
-      id: "bartolomeu",
-      name: "Bartolomeu",
-      d: "M 60 200 L 100 200 L 280 240 L 260 320 L 200 350 L 50 280 Z",
-      textX: 160,
-      textY: 270,
-    },
-    {
-      id: "tractorul",
-      name: "Tractorul",
-      d: "M 320 180 L 460 150 L 500 220 L 400 280 L 300 240 Z",
-      textX: 400,
-      textY: 210,
-    },
-    {
-      id: "triaj",
-      name: "Triaj",
-      d: "M 460 150 L 580 140 L 600 250 L 500 220 Z",
-      textX: 535,
-      textY: 190,
-    },
-    {
-      id: "centrul_nou",
-      name: "Centrul Civic",
-      d: "M 280 240 L 300 240 L 400 280 L 380 330 L 260 320 Z",
-      textX: 325,
-      textY: 290,
-    },
-    {
-      id: "florilor",
-      name: "Florilor",
-      d: "M 400 280 L 500 220 L 510 290 L 420 310 Z",
-      textX: 460,
-      textY: 275,
-    },
-    {
-      id: "est_zizin",
-      name: "Zizin",
-      d: "M 500 220 L 600 250 L 580 380 L 510 290 Z",
-      textX: 550,
-      textY: 300,
-    },
-    {
-      id: "centrul_vechi",
-      name: "Centrul Vechi",
-      d: "M 260 320 L 380 330 L 360 380 L 250 380 Z",
-      textX: 315,
-      textY: 355,
-    },
-    {
-      id: "schei",
-      name: "Schei",
-      d: "M 200 350 L 260 320 L 250 380 L 240 450 L 150 420 Z",
-      textX: 210,
-      textY: 400,
-    },
-    {
-      id: "astra",
-      name: "Astra",
-      d: "M 380 330 L 420 310 L 510 290 L 580 380 L 450 450 L 360 380 Z",
-      textX: 460,
-      textY: 370,
-    },
-    {
-      id: "valea_cetatii",
-      name: "Racadau",
-      d: "M 360 380 L 450 450 L 400 520 L 300 480 Z",
-      textX: 380,
-      textY: 460,
-    },
-    {
-      id: "noua",
-      name: "Noua",
-      d: "M 450 450 L 580 380 L 620 550 L 480 580 Z",
-      textX: 540,
-      textY: 480,
-    },
-    {
-      id: "poiana",
-      name: "Poiana Brasov",
-      d: "M 150 420 L 240 450 L 220 580 L 80 550 Z",
-      textX: 170,
-      textY: 510,
-    },
-  ];
-
-  return (
-    <div className="w-full max-w-5xl mx-auto p-4 flex flex-col items-center">
-      <div className="relative w-full aspect-[4/3] bg-blue-100/50 rounded-3xl shadow-2xl overflow-hidden border-4 border-slate-600/50 backdrop-blur-sm">
-        <svg
-          viewBox="0 0 650 600"
-          className="w-full h-full drop-shadow-lg absolute top-0 left-0"
-        >
-          <defs>
-            <filter id="inner-shadow">
-              <feOffset dx="0" dy="1" />
-              <feGaussianBlur stdDeviation="1" result="offset-blur" />
-              <feComposite
-                operator="out"
-                in="SourceGraphic"
-                in2="offset-blur"
-                result="inverse"
-              />
-              <feFlood floodColor="black" floodOpacity="0.2" result="color" />
-              <feComposite
-                operator="in"
-                in="color"
-                in2="inverse"
-                result="shadow"
-              />
-              <feComposite operator="over" in="shadow" in2="SourceGraphic" />
-            </filter>
-          </defs>
-
-          {zones.map((zone) => (
-            <g
-              key={zone.id}
-              onClick={() => onTerritoryClick(zone.id)}
-              className="group"
-            >
-              <path
-                d={zone.d}
-                fill={getFillColor(zone.id)}
-                className={getPathClass(zone.id)}
-                filter="url(#inner-shadow)"
-              />
-              {/* Text Shadow Layer */}
-              <text
-                x={zone.textX}
-                y={zone.textY}
-                textAnchor="middle"
-                className={textClass}
-                stroke="white"
-                strokeWidth="3"
-                opacity="0.8"
-              >
-                {zone.name}
-              </text>
-              {/* Main Text Layer */}
-              <text
-                x={zone.textX}
-                y={zone.textY}
-                textAnchor="middle"
-                className={textClass}
-              >
-                {zone.name}
-              </text>
-            </g>
-          ))}
-        </svg>
-      </div>
-    </div>
-  );
-};
-
-// --- MAIN APP ---
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -297,16 +42,23 @@ function App() {
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [notification, setNotification] = useState(null);
 
-  // Login Data
+  // Chat Data
+  const [chatOpen, setChatOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+
+  // Login & UI State
   const [hasJoined, setHasJoined] = useState(false);
+  const [uiStep, setUiStep] = useState("MENU"); // MENU, SINGLE_SETUP, MULTI_SETUP
+
+  // Form Data
   const [playerName, setPlayerName] = useState("");
-  const [roomCode, setRoomCode] = useState("brasov1");
+  const [roomCode, setRoomCode] = useState("");
   const [selectedColor, setSelectedColor] = useState(PLAYER_COLORS[0].hex);
+  const [gameMode, setGameMode] = useState("MULTI");
+  const [difficulty, setDifficulty] = useState("MEDIUM");
 
   useEffect(() => {
-    // 1. Check for existing session on mount
     const sessionID = localStorage.getItem("sessionID");
-
     if (sessionID) {
       socket.auth = { sessionID };
       socket.connect();
@@ -321,14 +73,9 @@ function App() {
       setUserId(userID);
     });
 
-    socket.on("connect", () => {
-      setIsConnected(true);
-    });
-
+    socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
 
-    // Game Updates
-    socket.on("update_map", setTerritories);
     socket.on("update_players", (newPlayers) => {
       setPlayers(newPlayers);
       if (socket.userID && newPlayers[socket.userID]) {
@@ -337,6 +84,7 @@ function App() {
         setSelectedColor(newPlayers[socket.userID].color);
       }
     });
+    socket.on("update_map", setTerritories);
     socket.on("update_gamestate", setGameState);
     socket.on("trivia_question", (q) => {
       setCurrentQuestion(q);
@@ -347,42 +95,58 @@ function App() {
       setNotification(res);
       setTimeout(() => setNotification(null), 3000);
     });
+    socket.on("receive_message", (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    });
 
     return () => {
       socket.off("connect");
       socket.off("disconnect");
       socket.off("session");
+      socket.off("update_map");
+      socket.off("update_players");
+      socket.off("update_gamestate");
+      socket.off("trivia_question");
+      socket.off("battle_result");
+      socket.off("receive_message");
     };
   }, []);
 
   const handleJoinGame = (e) => {
     e.preventDefault();
-    if (!playerName || !roomCode) return;
+
+    const finalRoomCode =
+      gameMode === "SINGLEPLAYER"
+        ? `SP-${Date.now().toString().slice(-6)}`
+        : roomCode;
+
+    if (!playerName || !finalRoomCode) return;
 
     socket.emit("join_game", {
       name: playerName,
       color: selectedColor,
-      roomId: roomCode,
+      roomId: finalRoomCode,
+      mode: gameMode,
+      difficulty: difficulty,
     });
+
+    setRoomCode(finalRoomCode);
     setHasJoined(true);
   };
 
   const handleLeaveGame = () => {
-    // 1. Ștergem sesiunea locală
     localStorage.removeItem("sessionID");
-
-    // 2. Resetăm autentificarea socket-ului pentru a nu refolosi vechiul ID
     socket.auth = {};
-
-    // 3. Deconectăm socket-ul curent (serverul va vedea asta ca un disconnect normal)
     socket.disconnect();
 
-    // 4. Resetăm starea UI
     setHasJoined(false);
     setPlayerName("");
     setRoomCode("");
     setPlayers({});
     setTerritories({});
+    setMessages([]);
+    setUiStep("MENU");
+
     setGameState({
       status: "LOBBY",
       phase: "",
@@ -390,239 +154,89 @@ function App() {
       playerIds: [],
       battleRound: 0,
     });
-
-    // 5. Reconectăm pentru a obține o nouă sesiune curată
     socket.connect();
   };
 
   const handleAnswerSubmit = (index) => socket.emit("submit_answer", index);
   const handleTerritoryClick = (id) => socket.emit("initiate_attack", id);
+  const handleSendMessage = (text) => socket.emit("send_message", text);
 
-  // Helpers
   const isMyTurn =
     gameState.status === "PLAYING" &&
     gameState.playerIds[gameState.turnIndex] === userId;
-
   const currentPlayerName =
     players[gameState.playerIds[gameState.turnIndex]]?.name || "Unknown";
-
-  // Verifică dacă adversarul este deconectat
   const opponent = Object.values(players).find((p) => p.id !== userId);
   const isOpponentOffline =
     gameState.status === "PLAYING" && opponent && !opponent.online;
 
-  // New logic: Check if the game has ended due to opponent disconnection (forfeit)
-  const isGameFinishedByForfeit =
-    gameState.status === "FINISHED" &&
-    gameState.winner &&
-    gameState.winner.includes("(Opponent disconnected)");
+  // --- RENDERING ---
 
-  // Effect to handle automatic exit on forfeit
-  useEffect(() => {
-    if (isGameFinishedByForfeit) {
-      // Option 1: Show alert then leave
-      alert(`Game Over! ${gameState.winner}`);
-      handleLeaveGame();
-
-      // Option 2: Just leave immediately (uncomment below if preferred)
-      // handleLeaveGame();
-    }
-  }, [isGameFinishedByForfeit]);
-
-  // LOGIN SCREEN
-  if (!hasJoined) {
+  // 1. MENU
+  if (!hasJoined && uiStep === "MENU") {
     return (
-      <div className="min-h-screen w-full flex flex-col md:flex-row bg-slate-900">
-        <div className="w-full md:w-1/2 flex flex-col justify-center items-center p-8 z-10 bg-slate-900 shadow-2xl">
-          <div className="max-w-md w-full space-y-8">
-            <div className="text-center md:text-left">
-              <h1 className="text-4xl md:text-5xl font-black text-white mb-2 tracking-tight">
-                BRAȘOV <span className="text-yellow-400">CONQUEST</span>
-              </h1>
-              <p className="text-slate-400 text-lg">Multiplayer Strategy</p>
-            </div>
-
-            <form onSubmit={handleJoinGame} className="space-y-6 mt-8">
-              {/* Name Input */}
-              <div>
-                <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2 block">
-                  Nume
-                </label>
-                <div className="relative">
-                  <User
-                    className="absolute left-3 top-3.5 text-slate-500"
-                    size={20}
-                  />
-                  <input
-                    className="w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-3 pl-10 text-white focus:border-yellow-400 focus:outline-none transition-all font-bold text-lg"
-                    placeholder="Ex: Vlad Țepeș"
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    maxLength={15}
-                  />
-                </div>
-              </div>
-
-              {/* Room Code Input */}
-              <div>
-                <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2 block">
-                  Cod Cameră
-                </label>
-                <div className="relative">
-                  <Hash
-                    className="absolute left-3 top-3.5 text-slate-500"
-                    size={20}
-                  />
-                  <input
-                    className="w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-3 pl-10 text-white focus:border-yellow-400 focus:outline-none transition-all font-bold text-lg uppercase"
-                    placeholder="Ex: BRASOV1"
-                    value={roomCode}
-                    onChange={(e) => setRoomCode(e.target.value)}
-                    maxLength={10}
-                  />
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Împarte acest cod cu un prieten pentru a juca împreună.
-                </p>
-              </div>
-
-              {/* Color Selection */}
-              <div>
-                <label className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 block">
-                  Alege facțiunea
-                </label>
-                <div className="flex gap-4 flex-wrap">
-                  {PLAYER_COLORS.map((c) => (
-                    <button
-                      key={c.hex}
-                      type="button"
-                      onClick={() => setSelectedColor(c.hex)}
-                      className={`w-12 h-12 rounded-full border-4 transition-all hover:scale-110 ${
-                        selectedColor === c.hex
-                          ? "border-white shadow-[0_0_15px_rgba(255,255,255,0.5)] scale-110"
-                          : "border-slate-700 opacity-60 hover:opacity-100"
-                      }`}
-                      style={{ backgroundColor: c.hex }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={!playerName || !roomCode}
-                className="w-full bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-black py-4 rounded-xl text-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-95 mt-4"
-              >
-                INTRĂ ÎN LUPTĂ
-              </button>
-            </form>
-
-            <div className="mt-8 flex items-center justify-center gap-2 text-slate-500 text-sm">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  isConnected ? "bg-green-500" : "bg-red-500"
-                }`}
-              ></div>
-              Status: {isConnected ? "Server Online" : "Se conectează..."}
-            </div>
-          </div>
-        </div>
-
-        {/* Right side background (Map visual) */}
-        <div className="hidden md:flex w-1/2 bg-slate-800 relative overflow-hidden items-center justify-center p-10">
-          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-          <div className="w-full max-w-2xl transform rotate-3 scale-110 opacity-40 grayscale pointer-events-none">
-            <BrasovMap
-              territories={territories}
-              onTerritoryClick={() => {}}
-              players={players}
-              currentPlayerId={null}
-            />
-          </div>
-        </div>
-      </div>
+      <GameMenu
+        onSelectMode={(step, mode) => {
+          setUiStep(step);
+          setGameMode(mode);
+        }}
+      />
     );
   }
 
-  // --- LOBBY (WAITING) ---
-  if (gameState.status === "LOBBY") {
+  // 2. SETUP
+  if (!hasJoined && (uiStep === "SINGLE_SETUP" || uiStep === "MULTI_SETUP")) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4 relative">
-        {/* Buton Iesire Lobby */}
-        <button
-          onClick={handleLeaveGame}
-          className="absolute top-6 right-6 flex items-center gap-2 text-red-400 hover:text-red-300 font-bold bg-slate-800 px-4 py-2 rounded-lg border border-red-500/30 transition-all hover:border-red-500"
-        >
-          <LogOut size={18} /> Ieși
-        </button>
-
-        <div className="bg-slate-800/50 p-10 rounded-3xl border border-slate-700 text-center max-w-2xl w-full backdrop-blur-sm">
-          <div className="mb-6 inline-block p-4 bg-slate-900 rounded-full border border-slate-600">
-            <Swords size={48} className="text-yellow-500 animate-pulse" />
-          </div>
-          <h2 className="text-3xl font-bold mb-2">
-            Camera: <span className="text-yellow-400">{roomCode}</span>
-          </h2>
-          <p className="text-slate-400 mb-8">Se așteaptă adversarul...</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            {Object.values(players).map((p) => (
-              <div
-                key={p.id}
-                className="bg-slate-700 p-4 rounded-xl flex items-center gap-4 border-2 border-slate-600 relative overflow-hidden"
-              >
-                {!p.online && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-red-400 font-bold text-xs uppercase tracking-widest">
-                    Deconectat
-                  </div>
-                )}
-                <div
-                  className="w-12 h-12 rounded-full border-2 border-white shadow-lg"
-                  style={{ backgroundColor: p.color }}
-                ></div>
-                <div className="text-left">
-                  <div className="font-bold text-lg">{p.name}</div>
-                  <div
-                    className={`text-xs font-mono ${
-                      p.online ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {p.online ? "PREGĂTIT" : "OFFLINE"}
-                  </div>
-                </div>
-              </div>
-            ))}
-            {/* Placeholder for empty slot */}
-            {Object.keys(players).length < 2 && (
-              <div className="bg-slate-800/50 p-4 rounded-xl flex items-center gap-4 border-2 border-dashed border-slate-700 text-slate-500">
-                <div className="w-12 h-12 rounded-full bg-slate-800 animate-pulse"></div>
-                <div>Așteptare...</div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <GameSetup
+        uiStep={uiStep}
+        onBack={() => setUiStep("MENU")}
+        onJoin={handleJoinGame}
+        playerName={playerName}
+        setPlayerName={setPlayerName}
+        roomCode={roomCode}
+        setRoomCode={setRoomCode}
+        difficulty={difficulty}
+        setDifficulty={setDifficulty}
+        selectedColor={selectedColor}
+        setSelectedColor={setSelectedColor}
+      />
     );
   }
 
-  // GAMEPLAY UI
+  // 3. LOBBY (Multiplayer only)
+  if (gameState.status === "LOBBY" && gameMode === "MULTI") {
+    return (
+      <GameLobby
+        roomCode={roomCode}
+        players={players}
+        onLeave={handleLeaveGame}
+        chatOpen={chatOpen}
+        setChatOpen={setChatOpen}
+        messages={messages}
+        onSendMessage={handleSendMessage}
+        currentUserId={userId}
+      />
+    );
+  }
+
+  // 4. GAMEPLAY UI
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center font-sans relative overflow-x-hidden">
-      {/* BANNER DECONECTARE */}
-      {isOpponentOffline && (
+      {gameState.status === "FINISHED" && (
+        <GameOverModal winner={gameState.winner} onRestart={handleLeaveGame} />
+      )}
+      {gameMode === "MULTI" && isOpponentOffline && (
         <div className="w-full bg-red-600/90 text-white font-bold text-center py-2 animate-pulse flex items-center justify-center gap-2 z-50 sticky top-0">
-          <WifiOff size={20} />
+          <WifiOff size={20} />{" "}
           <span>
             Adversarul s-a deconectat! Dacă nu revine în 60s, câștigi prin
             forfeit.
           </span>
         </div>
       )}
-
       {currentQuestion && (
         <TriviaModal data={currentQuestion} onAnswer={handleAnswerSubmit} />
       )}
-
       {notification && (
         <div
           className={`fixed top-32 z-[100] px-8 py-3 rounded-xl shadow-2xl font-black text-xl border-2 animate-bounce ${
@@ -635,68 +249,18 @@ function App() {
         </div>
       )}
 
-      {/* HEADER */}
-      <div className="w-full bg-slate-800 border-b border-slate-700 p-4 shadow-lg z-40 sticky top-0">
-        {" "}
-        {/* Adjusted sticky if banner is present */}
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="bg-slate-900 p-2 rounded-lg border border-slate-700">
-              <MapIcon size={20} className="text-yellow-500" />
-            </div>
-            <div>
-              <h1 className="font-bold text-lg leading-none">
-                Room: {roomCode}
-              </h1>
-              <p className="text-xs text-slate-400 font-mono">
-                FAZA:{" "}
-                <span className="text-yellow-400 font-bold">
-                  {gameState.phase}
-                </span>
-              </p>
-            </div>
-          </div>
+      <GameHeader
+        gameMode={gameMode}
+        roomCode={roomCode}
+        gameState={gameState}
+        isMyTurn={isMyTurn}
+        currentPlayerName={currentPlayerName}
+        playerName={playerName}
+        selectedColor={selectedColor}
+        onLeave={handleLeaveGame}
+      />
 
-          <div
-            className={`px-6 py-2 rounded-full border font-bold flex items-center gap-3 transition-all ${
-              isMyTurn
-                ? "bg-green-600/20 border-green-500 text-green-400 shadow-[0_0_15px_rgba(34,197,94,0.3)]"
-                : "bg-slate-900 border-slate-600 text-slate-500"
-            }`}
-          >
-            {isMyTurn && (
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-              </span>
-            )}
-            {isMyTurn ? "RÂNDUL TĂU" : `Așteaptă: ${currentPlayerName}`}
-          </div>
-
-          <div className="hidden md:flex items-center gap-4">
-            <button
-              onClick={handleLeaveGame}
-              className="mr-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
-              title="Părăsește Jocul"
-            >
-              <LogOut size={20} />
-            </button>
-
-            <div className="text-right">
-              <p className="text-sm font-bold">{playerName}</p>
-              <p className="text-xs text-slate-400">Comandant</p>
-            </div>
-            <div
-              className="w-10 h-10 rounded-full border-2 border-white"
-              style={{ backgroundColor: selectedColor }}
-            ></div>
-          </div>
-        </div>
-      </div>
-
-      {/* GAME CONTENT */}
       <div className="flex flex-col lg:flex-row w-full max-w-[1600px] gap-6 p-4 flex-grow">
-        {/* MAP */}
         <div
           className={`flex-1 bg-slate-800/30 rounded-3xl border border-slate-700/50 p-2 md:p-6 transition-opacity duration-500 relative ${
             !isMyTurn ? "opacity-90" : ""
@@ -709,77 +273,26 @@ function App() {
             currentPlayerId={userId}
           />
         </div>
-
-        {/* SIDEBAR */}
-        <div className="w-full lg:w-80 flex flex-col gap-4">
-          {/* Leaderboard */}
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden shadow-xl">
-            <div className="bg-slate-900/50 p-4 border-b border-slate-700 flex items-center gap-2">
-              <Trophy className="text-yellow-500" size={18} />
-              <h3 className="font-bold text-slate-200 uppercase text-sm tracking-wider">
-                Clasament
-              </h3>
-            </div>
-            <div className="p-2">
-              {Object.values(players)
-                .sort((a, b) => b.score - a.score)
-                .map((p, i) => (
-                  <div
-                    key={p.id}
-                    className={`flex items-center justify-between p-3 rounded-xl mb-1 ${
-                      gameState.playerIds[gameState.turnIndex] === p.id
-                        ? "bg-white/5 border border-white/10"
-                        : ""
-                    } ${
-                      !p.online
-                        ? "opacity-50 grayscale border-red-500/30 border"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-slate-500 font-bold w-4 text-sm">
-                        {i + 1}
-                      </span>
-                      <div
-                        className="w-8 h-8 rounded-full border border-slate-500 shadow-sm"
-                        style={{ backgroundColor: p.color }}
-                      ></div>
-                      <div>
-                        <div
-                          className={`text-sm font-bold ${
-                            p.id === userId ? "text-white" : "text-slate-400"
-                          }`}
-                        >
-                          {p.name} {p.id === userId && "(Tu)"}
-                        </div>
-                        {!p.online && (
-                          <div className="text-[10px] text-red-400 font-bold animate-pulse flex items-center gap-1">
-                            <WifiOff size={10} /> DECONECTAT
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="font-mono font-bold text-yellow-400 text-lg">
-                      {p.score}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </div>
-
-          {/* Instructions */}
-          <div className="bg-blue-900/20 rounded-2xl border border-blue-500/20 p-5 text-sm text-blue-200/80">
-            <h4 className="font-bold text-blue-400 mb-2 flex items-center gap-2">
-              <Swords size={16} /> Misiune:
-            </h4>
-            <p>
-              {gameState.phase === "EXPANSION"
-                ? "Cucerește teritorii neutre (Gri)."
-                : "Atacă vecinii. Nu îți pierde pământul!"}
-            </p>
-          </div>
-        </div>
+        <GameSidebar
+          players={players}
+          gameState={gameState}
+          currentUserId={userId}
+        />
       </div>
+
+      <button
+        onClick={() => setChatOpen(!chatOpen)}
+        className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-500 text-white p-4 rounded-full shadow-lg transition-all z-50 hover:scale-110"
+      >
+        {chatOpen ? <X size={24} /> : <MessageCircle size={24} />}
+      </button>
+      <ChatWindow
+        messages={messages}
+        isOpen={chatOpen}
+        onClose={() => setChatOpen(false)}
+        onSend={handleSendMessage}
+        currentUserId={userId}
+      />
     </div>
   );
 }
